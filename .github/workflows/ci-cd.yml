@@ -36,7 +36,7 @@ jobs:
         cache: maven
 
     - name: Cache Maven dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.m2
         key: ${{ runner.os }}-m2-${{ hashFiles('app/pom.xml') }}
@@ -65,7 +65,7 @@ jobs:
       run: mvn jacoco:report
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./app/target/site/jacoco/jacoco.xml
         flags: unittests
@@ -96,7 +96,7 @@ jobs:
           -DsuppressionsFile=../.github/owasp-suppressions.xml || true
 
     - name: Upload OWASP report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: owasp-report
@@ -151,7 +151,7 @@ jobs:
         output: 'trivy-results.sarif'
 
     - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v2
+      uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
@@ -231,7 +231,7 @@ jobs:
         echo "Performance tests completed"
 
     - name: Upload performance results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: performance-results
