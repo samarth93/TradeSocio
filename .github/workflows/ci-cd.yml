@@ -32,13 +32,15 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.m2
-        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        key: ${{ runner.os }}-m2-${{ hashFiles('app/pom.xml') }}
         restore-keys: ${{ runner.os }}-m2
 
     - name: Run tests
+      working-directory: ./app
       run: mvn clean test
 
     - name: Run integration tests
+      working-directory: ./app
       run: mvn verify
 
     - name: Generate test report
@@ -46,17 +48,18 @@ jobs:
       if: success() || failure()
       with:
         name: Maven Tests
-        path: target/surefire-reports/*.xml
+        path: app/target/surefire-reports/*.xml
         reporter: java-junit
         fail-on-error: true
 
     - name: Code coverage
+      working-directory: ./app
       run: mvn jacoco:report
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
       with:
-        file: ./target/site/jacoco/jacoco.xml
+        file: ./app/target/site/jacoco/jacoco.xml
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
@@ -78,17 +81,18 @@ jobs:
         cache: maven
 
     - name: Run OWASP Dependency Check
+      working-directory: ./app
       run: |
         mvn org.owasp:dependency-check-maven:check \
           -DfailBuildOnCVSS=7 \
-          -DsuppressionsFile=.github/owasp-suppressions.xml || true
+          -DsuppressionsFile=../.github/owasp-suppressions.xml || true
 
     - name: Upload OWASP report
       uses: actions/upload-artifact@v3
       if: always()
       with:
         name: owasp-report
-        path: target/dependency-check-report.html
+        path: app/target/dependency-check-report.html
 
   build-and-push:
     name: Build and Push Docker Image
@@ -123,7 +127,7 @@ jobs:
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: ./app
         platforms: linux/amd64,linux/arm64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
