@@ -1,0 +1,20 @@
+apiVersion: v2
+name: devops-challenge
+description: A Helm chart for DevOps Challenge API Service
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/YOUR_USERNAME/devops-challenge
+sources:
+  - https://github.com/YOUR_USERNAME/devops-challenge
+maintainers:
+  - name: Your Name
+    email: your.email@example.com
+keywords:
+  - api
+  - spring-boot
+  - microservice
+  - prometheus
+  - metrics
+annotations:
+  category: Application 

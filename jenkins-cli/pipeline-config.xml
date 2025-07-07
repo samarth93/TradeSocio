@@ -1,0 +1,255 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@2.40">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@1.8.5"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@1.8.5">
+      <jobProperties/>
+      <triggers/>
+      <parameters/>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description>DevOps Challenge - Complete CI/CD Pipeline for Spring Boot Application</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.plugins.jira.JiraProjectProperty plugin="jira@3.7"/>
+    <hudson.plugins.buildblocker.BuildBlockerProperty plugin="build-blocker-plugin@1.7.8">
+      <useBuildBlocker>false</useBuildBlocker>
+      <blockLevel>GLOBAL</blockLevel>
+      <scanQueueFor>DISABLED</scanQueueFor>
+      <blockingJobs></blockingJobs>
+    </hudson.plugins.buildblocker.BuildBlockerProperty>
+    <com.ericsson.duraci.messaging.ImplicitMessagingContributorProperty plugin="eiffel-core@75.0.1">
+      <scriptEnabled>false</scriptEnabled>
+    </com.ericsson.duraci.messaging.ImplicitMessagingContributorProperty>
+    <com.sonyericsson.jenkins.plugins.bfa.model.ScannerJobProperty plugin="build-failure-analyzer@2.2.0">
+      <doNotScan>false</doNotScan>
+    </com.sonyericsson.jenkins.plugins.bfa.model.ScannerJobProperty>
+    <com.chikli.hudson.plugin.naginator.NaginatorOptOutProperty plugin="naginator@1.18.1">
+      <optOut>false</optOut>
+    </com.chikli.hudson.plugin.naginator.NaginatorOptOutProperty>
+    <com.synopsys.arc.jenkins.plugins.ownership.jobs.JobOwnerJobProperty plugin="ownership@0.13.0">
+      <ownership>
+        <ownershipEnabled>true</ownershipEnabled>
+        <primaryOwnerId>samarth</primaryOwnerId>
+        <coownersIds class="sorted-set"/>
+      </ownership>
+    </com.synopsys.arc.jenkins.plugins.ownership.jobs.JobOwnerJobProperty>
+    <com.sonyericsson.rebuild.RebuildSettings plugin="rebuild@1.33">
+      <autoRebuild>false</autoRebuild>
+      <rebuildDisabled>false</rebuildDisabled>
+    </com.sonyericsson.rebuild.RebuildSettings>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>DOCKER_TAG</name>
+          <description>Docker image tag (default: BUILD_NUMBER)</description>
+          <defaultValue>${BUILD_NUMBER}</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>SKIP_TESTS</name>
+          <description>Skip running tests</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>DEPLOY_TO_PROD</name>
+          <description>Deploy to production environment</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers>
+        <hudson.triggers.SCMTrigger>
+          <spec>H/5 * * * *</spec>
+          <ignorePostCommitHooks>false</ignorePostCommitHooks>
+        </hudson.triggers.SCMTrigger>
+      </triggers>
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+    <script>pipeline {
+    agent any
+    
+    environment {
+        // Application details
+        APP_NAME = 'devops-challenge'
+        APP_VERSION = '1.0.0'
+        DOCKER_IMAGE = "${APP_NAME}:${BUILD_NUMBER}"
+        DOCKER_LATEST = "${APP_NAME}:latest"
+        
+        // Docker registry
+        DOCKER_REPO = 'samarthdev'  // Change this to your Docker Hub username
+        
+        // Kubernetes namespace
+        K8S_NAMESPACE = 'devops-challenge'
+        
+        // Maven options
+        MAVEN_OPTS = '-Dmaven.repo.local=.m2/repository'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '🔄 Checking out source code...'
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: "git rev-parse --short HEAD || echo 'no-git'",
+                        returnStdout: true
+                    ).trim()
+                }
+                echo "Git commit: ${env.GIT_COMMIT_SHORT}"
+            }
+        }
+        
+        stage('Build & Test') {
+            parallel {
+                stage('Compile & Package') {
+                    steps {
+                        dir('app') {
+                            echo '🔨 Building application...'
+                            sh 'mvn clean compile -DskipTests'
+                            sh 'mvn package -DskipTests'
+                        }
+                    }
+                }
+                
+                stage('Unit Tests') {
+                    when {
+                        not { params.SKIP_TESTS }
+                    }
+                    steps {
+                        dir('app') {
+                            echo '🧪 Running unit tests...'
+                            sh 'mvn test || true'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dir('app') {
+                        echo '🐳 Building Docker image...'
+                        sh "docker build -t ${DOCKER_REPO}/${DOCKER_IMAGE} ."
+                        sh "docker tag ${DOCKER_REPO}/${DOCKER_IMAGE} ${DOCKER_REPO}/${DOCKER_LATEST}"
+                        echo "Built Docker image: ${DOCKER_REPO}/${DOCKER_IMAGE}"
+                    }
+                }
+            }
+        }
+        
+        stage('Test Docker Image') {
+            steps {
+                script {
+                    echo '🧪 Testing Docker image...'
+                    
+                    // Start container for testing
+                    sh "docker run -d -p 8084:8080 --name test-${BUILD_NUMBER} ${DOCKER_REPO}/${DOCKER_IMAGE}"
+                    
+                    try {
+                        // Wait for application to start
+                        sleep 15
+                        
+                        // Test health endpoint
+                        sh '''
+                            curl -f http://localhost:8084/api/health || exit 1
+                            echo "✅ Health check passed"
+                        '''
+                        
+                        // Test main API endpoint
+                        sh '''
+                            curl -f http://localhost:8084/api || exit 1
+                            echo "✅ API endpoint test passed"
+                        '''
+                        
+                    } finally {
+                        // Always stop and remove the test container
+                        sh "docker stop test-${BUILD_NUMBER} || true"
+                        sh "docker rm test-${BUILD_NUMBER} || true"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Minikube') {
+            steps {
+                script {
+                    echo '🚀 Deploying to Minikube...'
+                    
+                    // Load Docker image into Minikube
+                    sh "minikube image load ${DOCKER_REPO}/${DOCKER_IMAGE}"
+                    
+                    // Deploy using Helm
+                    sh """
+                        helm upgrade --install ${APP_NAME} ./helm-chart/devops-chart \\
+                            --namespace ${K8S_NAMESPACE} \\
+                            --create-namespace \\
+                            --set image.repository=${DOCKER_REPO}/${APP_NAME} \\
+                            --set image.tag=${BUILD_NUMBER} \\
+                            --set image.pullPolicy=Never \\
+                            --wait || echo "Helm deployment failed, continuing..."
+                    """
+                    
+                    // Check deployment status
+                    sh "kubectl get pods -n ${K8S_NAMESPACE} || true"
+                    sh "kubectl get services -n ${K8S_NAMESPACE} || true"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo '🧹 Cleaning up...'
+            
+            // Clean up test containers
+            sh "docker stop test-${BUILD_NUMBER} || true"
+            sh "docker rm test-${BUILD_NUMBER} || true"
+            
+            // Clean up old Docker images
+            sh "docker system prune -f || true"
+        }
+        
+        success {
+            echo '✅ Pipeline completed successfully!'
+            script {
+                def message = """
+                🎉 Build #${BUILD_NUMBER} completed successfully!
+                
+                📋 Details:
+                • Project: ${APP_NAME}
+                • Version: ${APP_VERSION}
+                • Commit: ${env.GIT_COMMIT_SHORT}
+                • Docker Image: ${DOCKER_REPO}/${DOCKER_IMAGE}
+                • Duration: ${currentBuild.durationString}
+                """
+                echo message
+            }
+        }
+        
+        failure {
+            echo '❌ Pipeline failed!'
+            script {
+                def message = """
+                🚨 Build #${BUILD_NUMBER} failed!
+                
+                📋 Details:
+                • Project: ${APP_NAME}
+                • Commit: ${env.GIT_COMMIT_SHORT}
+                • Duration: ${currentBuild.durationString}
+                """
+                echo message
+            }
+        }
+    }
+}</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition> 

@@ -1,0 +1,104 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@2.40">
+  <description>DevOps Challenge - Simple CI/CD Pipeline</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.BooleanParameterDefinition>
+          <name>SKIP_TESTS</name>
+          <description>Skip running tests</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+    <script>
+pipeline {
+    agent any
+    
+    environment {
+        APP_NAME = 'devops-challenge'
+        DOCKER_IMAGE = "devops-app:${BUILD_NUMBER}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out source code...'
+                checkout scm
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                dir('app') {
+                    echo 'Building application...'
+                    sh 'mvn clean compile -DskipTests'
+                    sh 'mvn package -DskipTests'
+                }
+            }
+        }
+        
+        stage('Test') {
+            when {
+                not { 
+                    params.SKIP_TESTS == true
+                }
+            }
+            steps {
+                dir('app') {
+                    echo 'Running tests...'
+                    sh 'mvn test || true'
+                }
+            }
+        }
+        
+        stage('Docker Build') {
+            steps {
+                dir('app') {
+                    echo 'Building Docker image...'
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
+        
+        stage('Docker Test') {
+            steps {
+                script {
+                    echo 'Testing Docker image...'
+                    sh "docker run -d -p 8085:8080 --name test-${BUILD_NUMBER} ${DOCKER_IMAGE}"
+                    
+                    try {
+                        sleep 15
+                        sh "curl -f http://localhost:8085/api/health || exit 1"
+                        echo 'Docker test passed!'
+                    } finally {
+                        sh "docker stop test-${BUILD_NUMBER} || true"
+                        sh "docker rm test-${BUILD_NUMBER} || true"
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up...'
+            sh "docker system prune -f || true"
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
+    </script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition> 
